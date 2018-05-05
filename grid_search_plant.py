@@ -13,6 +13,7 @@ from trainer import Trainer
 from sklearn.model_selection import StratifiedKFold
 import extensions
 from datasets.sub_dataset import SubDataset
+from sklearn.model_selection import ParameterGrid
 
 # Training settings
 parser = argparse.ArgumentParser(description='PyTorch MNIST Example')
@@ -31,8 +32,24 @@ parser.add_argument('--seed', type=int, default=1, metavar='S',
 parser.add_argument('--log-interval', type=int, default=10, metavar='N',
                     help='how many batches to wait before logging training status')
 args = parser.parse_args()
+    
+def optimize_params():
+    params = {
+            "lr": [2**-i for i in range(1, 4)],
+            "momentum": [2**-i for i in range(1, 5)]
+            }
 
-def train():
+    grid_params = ParameterGrid(params)
+    errors = []
+    for params in grid_params:
+        error = train(params)
+        print(f"{params}\n{error}")
+        errors.append([params, error])
+    errors = sorted(errors, key=lambda x: x[1])
+    print(errors)
+    print(errors[0])
+
+def train(params):
     kwargs = {'num_workers': 32, 'pin_memory': True}
 
     train_dataset = datasets.ImageFolder('/home/agri/datasets_sai/leaves_datasets/12_class/')
@@ -40,26 +57,21 @@ def train():
     y = list(map(lambda x: x[1], train_dataset.imgs))
 
     train_dataset.transform = transforms.Compose([
-#        transforms.RandomChoice([
-#            transforms.RandomRotation(i, resample=2, expand=False, center=None) for i in range(0, 360, 20)
-#        ]),
-        #transforms.CenterCrop(224),
+        transforms.RandomChoice([
+            transforms.RandomRotation(i, resample=2, expand=False, center=None) for i in range(0, 360, 10)
+        ]),
         transforms.RandomHorizontalFlip(p=0.5),
-        transforms.Lambda(rotate_crop),
-        transforms.Resize(224, interpolation=2),
+        transforms.CenterCrop(224),
         transforms.ToTensor()
     ])
     test_dataset.transform = transforms.Compose([
-        #transforms.CenterCrop(224),
-        transforms.Resize(224, interpolation=2),
+        transforms.CenterCrop(224),
         transforms.ToTensor()
     ])
-
+    
     k_fold = StratifiedKFold(n_splits=4, shuffle=True, random_state=0)
 
-    for i, (train_indecas, test_indecas) in enumerate(k_fold.split(train_dataset.imgs, y)):
-        if i == 0:
-            continue
+    for train_indecas, test_indecas in k_fold.split(train_dataset.imgs, y):
         train_X = SubDataset(train_dataset, train_indecas)
         test_X = SubDataset(test_dataset, test_indecas)
 
@@ -73,14 +85,14 @@ def train():
         #model = nn.DataParallel(model)
         
         torch.backends.cudnn.benchmark = True
-        optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
+        optimizer = optim.SGD(model.parameters(), lr=params["lr"], momentum=params["momentum"])
     
         trainer = Trainer(
                 model=model,
                 max_epochs=args.epochs,
                 optimizer=optimizer,
                 batch_size=args.batch_size,
-                out=f"./results_plant_fit_crop/lr-{args.lr}_momentum-{args.momentum}")
+                out=f"./results_plant/lr-{params['lr']}_momentum-{params['momentum']}")
 
         trainer.extend(scheduler(optimizer))
         trainer.extend(extensions.LogReport())
@@ -96,32 +108,10 @@ def train():
             "optim_momentum"]))
 
         trainer.fit(train_X, val_X=test_X, **kwargs)
-        break
-
-from PIL import Image
-import numpy as np
-import random
-
-def rotate_crop(img):
-    w, h = img.size
-
-    angle = random.choice([i for i in range(0, 360, 10)])
-    img = img.rotate(angle, expand=False, resample=Image.BILINEAR)
-
-    rad = angle * np.pi / 180
-    new_length = int(h / (np.abs(np.cos(rad)) + np.abs(np.sin(rad))))
-
-    left = (w - new_length) // 2
-    top = (h - new_length) // 2
-    right = new_length + left
-    bottom = new_length + top
-    
-    img = img.crop((left, top, right, bottom))
-    return img
-
+        return 1 - trainer.acc(test_X, **kwargs)
 
 def scheduler(optimizer):
-    _scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=10)
+    _scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.5, patience=2)
     def step(trainer):
         _scheduler.step(1 - trainer.observation["validation/accuracy"])
     return step
@@ -130,4 +120,4 @@ def save_model(path, model):
     torch.save(model.state_dict(), path)
 
 if __name__ == "__main__":
-    train()
+    optimize_params()

@@ -19,21 +19,21 @@ class ProposeCNN(nn.Module):
     """
     既存のモデルはAlexベース. これがVGGベース.
     """
-    def __init__(self, fc=512):
+    def __init__(self, fc=512, out=8):
         super(ProposeCNN, self).__init__()
-        self.conv1_1 = Block(3, 12)
-        self.conv2_1 = Block(12, 24)
-        self.conv3_1 = Block(24, 48)
-        self.conv3_2 = Block(48, 48)
-        self.conv4_1 = Block(48, 96)
-        self.conv4_2 = Block(96, 96)
-        self.conv5_1 = Block(96, 96)
-        self.conv5_2 = Block(96, 96)
-        self.fc1 = nn.Linear(96*7*7, fc)
+        self.conv1_1 = Block(3, 24)
+        self.conv2_1 = Block(24, 48)
+        self.conv3_1 = Block(48, 96)
+        self.conv3_2 = Block(96, 96)
+        self.conv4_1 = Block(96, 96*2)
+        self.conv4_2 = Block(96*2, 96*2)
+        self.conv5_1 = Block(96*2, 96*2)
+        self.conv5_2 = Block(96*2, 96*2)
+        self.fc1 = nn.Linear(96*2*7*7, fc)
         self.bn_fc1 = nn.BatchNorm1d(fc)
         self.fc2 = nn.Linear(fc, fc)
         self.bn_fc2 = nn.BatchNorm1d(fc)
-        self.fc3 = nn.Linear(fc, 8)
+        self.fc3 = nn.Linear(fc, out)
 
     def __call__(self, x):
         h = self.conv1_1(x)
@@ -54,7 +54,7 @@ class ProposeCNN(nn.Module):
         h = self.conv5_2(h)
         h = F.max_pool2d(h, kernel_size=2, stride=2)
 
-        h = h.view(-1, 96*7*7)
+        h = h.view(-1, 96*2*7*7)
 
         h = self.fc1(h)
         h = self.bn_fc1(h)
@@ -67,3 +67,7 @@ class ProposeCNN(nn.Module):
         h = self.fc3(h)
 
         return F.log_softmax(h, dim=1)
+
+    def forward(self, X, **args):
+        X = self(X)
+        return X
